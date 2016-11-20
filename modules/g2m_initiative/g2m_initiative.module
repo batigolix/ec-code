@@ -1,0 +1,104 @@
+<?php
+/**
+ * @file
+ * Code for the Go to market initiative feature.
+ */
+
+include_once 'g2m_initiative.features.inc';
+
+/**
+ * @file
+ * Code for the Go to market initiative feature.
+ */
+
+module_load_include('inc', 'g2m_initiative', 'g2m_initiative.features');
+
+/**
+ * Implements hook_node_insert().
+ *
+ * Sets the title of the referencing node as the title of the referenced node.
+ */
+function g2m_initiative_node_insert($node) {
+  if ($node->type == 'g2m_initiative') {
+
+    // Fetches title of referencing node.
+    $wrnode = entity_metadata_wrapper('node', $node);
+    if (_g2m_initiative_fieldcheck('title_field', $wrnode)) {
+      $title = $wrnode->title_field->value();
+    }
+    else {
+      $title = $wrnode->title->value();
+    }
+    if (isset($title)) {
+
+      // Loads the referenced node, wraps it, sets title and saves it.
+      if (_g2m_initiative_fieldcheck('g2m_generic_information', $wrnode)) {
+        $gp_node = $wrnode->g2m_generic_information->value();
+        $wrgp_node = entity_metadata_wrapper('node', $gp_node);
+        if (_g2m_initiative_fieldcheck('title_field', $wrgp_node)) {
+          $wrgp_node->title_field->set($title);
+        }
+        $wrgp_node->title->set($title);
+        $wrgp_node->save();
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_inline_entity_form_entity_form_alter().
+ *
+ * @todo. make work for edit operations (not only add)
+ */
+function g2m_initiative_inline_entity_form_entity_form_alter(&$entity_form, &$form_state) {
+  if ($entity_form['#op'] == 'add' && $entity_form['#entity_type'] == 'node') {
+
+    // Autogenerates the title and hides the field.
+    $entity_form['title']['#value'] = 'temp title';
+    $entity_form['title']['#type'] = 'value';
+    $entity_form['title']['#required'] = FALSE;
+
+    // Checks if title replaced field if title module is active.
+    if (module_exists('title') && isset($entity_form['title_field'])) {
+      $entity_form['title_field'][$entity_form['title_field']['#language']][0]['value']['#type'] = 'value';
+      $entity_form['title_field'][$entity_form['title_field']['#language']][0]['value']['#value'] = 'temp title';
+      $entity_form['title_field'][$entity_form['title_field']['#language']][0]['value']['#required'] = FALSE;
+    }
+  }
+  $entity_form['status']['#access'] = FALSE;
+}
+
+/**
+ * Checks if wrapped entity fields have a value.
+ */
+function _g2m_initiative_fieldcheck($field, $wrentity) {
+  if ($wrentity->__isset($field)) {
+    $fieldvalue = $wrentity->$field->value();
+    if (!empty($fieldvalue)) {
+      return TRUE;
+    }
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Inspects wrapped entities & fields.
+ */
+function _g2m_initiative_wrapper_inspect($w) {
+  $values = array();
+  foreach ($w->getPropertyInfo() as $key => $val) {
+    $values[$key] = $w->$key->value();
+  }
+  return $values;
+}
+
+/**
+ * Implements hook_preprocess_views_view().
+ */
+function g2m_initiative_preprocess_views_view(&$vars) {
+  if ($vars['view']->name == 'go_to_market_initiatives_2') {
+    drupal_add_js(drupal_get_path('module', 'g2m_initiative') . '/js/g2m_initiative.js');
+  }
+}

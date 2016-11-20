@@ -1,0 +1,337 @@
+<?php
+
+/**
+ * @file
+ * This file contains the connect_country install functions.
+ */
+
+/**
+ * Implements hook_enable().
+ */
+function connect_country_enable() {
+  // Add content_types to solr indexes.
+  multisite_drupal_toolbox_config_solr_bundle('going_local', 'add');
+  multisite_drupal_toolbox_config_solr_bundle('score_board', 'add');
+  drupal_set_message(t('Connect Country: Country pages are enabled on your site.'));
+}
+
+/**
+ * Implements hook_install().
+ */
+function connect_country_install() {
+  drupal_set_message('Connect Country: Country pages are enabled on your site.');
+}
+
+/**
+ * Implements hook_disable().
+ */
+function connect_country_disable() {
+  multisite_drupal_toolbox_disable_content_type('going_local');
+  multisite_drupal_toolbox_disable_content_type('score_board');
+  // Content_types from solr indexes.
+  multisite_drupal_toolbox_config_solr_bundle('going_local', 'delete');
+  multisite_drupal_toolbox_config_solr_bundle('score_board', 'delete');
+  drupal_set_message(t('Connect Country: Country pages are disabled on your site.'));
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function connect_country_uninstall() {
+  // Removing variables set by feature on uninstall.
+  variable_del('comment_anonymous' . $type);
+  variable_del('comment_anonymous_going_local');
+  variable_del('comment_anonymous_score_board');
+  variable_del('comment' . $type);
+  variable_del('comment_default_mode' . $type);
+  variable_del('comment_default_mode_going_local');
+  variable_del('comment_default_mode_score_board');
+  variable_del('comment_default_per_page' . $type);
+  variable_del('comment_default_per_page_going_local');
+  variable_del('comment_default_per_page_score_board');
+  variable_del('comment_form_location' . $type);
+  variable_del('comment_form_location_going_local');
+  variable_del('comment_going_local');
+  variable_del('comment_preview' . $type);
+  variable_del('comment_preview_going_local');
+  variable_del('comment_preview_score_board');
+  variable_del('comment_score_board');
+  variable_del('comment_subject_field' . $type);
+  variable_del('comment_subject_field_going_local');
+  variable_del('comment_subject_field_score_board');
+  variable_del('i18n_sync_node_type' . $type);
+  variable_del('i18n_sync_node_type_going_local');
+  variable_del('i18n_sync_node_type_score_board');
+  variable_del('language_content_type' . $type);
+  variable_del('language_content_type_going_local');
+  variable_del('language_content_type_score_board');
+  variable_del('menu_options' . $type);
+  variable_del('menu_options_going_local');
+  variable_del('menu_options_score_board');
+  variable_del('menu_parent' . $type);
+  variable_del('menu_parent_going_local');
+  variable_del('menu_parent_score_board');
+  variable_del('node_options' . $type);
+  variable_del('node_options_going_local');
+  variable_del('node_options_score_board');
+  variable_del('node_preview' . $type);
+  variable_del('node_preview_going_local');
+  variable_del('node_preview_score_board');
+  variable_del('node_submitted' . $type);
+  variable_del('node_submitted_going_local');
+  variable_del('node_submitted_score_board');
+  drupal_set_message(t('Connect Country: Country pages are uninstalled from your site.'));
+}
+
+/**
+ * Disable geo chapter views, they will be replaced by custom blocks.
+ */
+function connect_country_update_7001() {
+  // List of old views that should be disabled.
+  $viewnames = array(
+    'geo_chapters_digital_champions',
+    'geo_chapters_going_local',
+    'geo_chapters_projects',
+    'geo_chapters_scoreboard',
+  );
+  // Grab list of views that are already disabled.
+  $views_status = variable_get('views_defaults ', array());
+  // Add our views to be disabled to the list.
+  foreach ($viewnames as $key => $viewname) {
+    $views_status[$viewname] = TRUE;
+  }
+  // Reset the variable with the new list.
+  variable_set('views_defaults ', $views_status);
+  // Empty cache now.
+  if (function_exists('views_invalidate_cache')) {
+    views_invalidate_cache();
+  }
+}
+
+/**
+ * Sets module weight, replace url aliases.
+ */
+function connect_country_update_7002() {
+
+  // Set heavy weight of Connect Country module so its hooks run later.
+  db_update('system')
+    ->fields(array('weight' => 99))
+    ->condition('name', 'connect_country', '=')
+    ->execute();
+
+  // Delete and rebuild paths.
+  _connect_country_delete_rebuild_paths();
+}
+
+/**
+ * Makes necessary content type changes for the 7.x-2.4 version of this module.
+ *
+ * It is quite a list so brace yourself:
+ * - Deletes the content types "DA in your country" and "geo menu".
+ * - Creates the Country page "Other content" box that will not be featurized.
+ * - Sets defaults for the basic page teaser.
+ * - Migrates data from the basic page map field to the shared country field.
+ * - Fixes URL aliases related to country. Import country flags.
+ * - Deletes obsolete fields in Going local.
+ */
+function connect_country_update_7204() {
+
+  // Deletes the custom geo menu map field.
+  $fields = array(
+    'field_geo_menu_map',
+  );
+  foreach ($fields as $field) {
+    field_delete_field($field);
+    if ($instance = field_info_instance('node', $field, 'geo_menu')) {
+      field_delete_instance($instance);
+    }
+  }
+  field_purge_batch(count($fields));
+
+  // Deleted the obsolete modules and related settings.
+  $types = array(
+    'da_in_your_country',
+    'geo_menu',
+  );
+  foreach (
+    $types as $type) {
+    node_type_delete($type);
+    variable_del('node_preview_' . $type);
+    variable_del('comment_anonymous_' . $type);
+    variable_del('comment_' . $type);
+    variable_del('comment_default_mode_' . $type);
+    variable_del('comment_default_per_page_' . $type);
+    variable_del('comment_form_location_' . $type);
+    variable_del('comment_preview_' . $type);
+    variable_del('comment_subject_field_' . $type);
+    variable_del('i18n_sync_node_type_' . $type);
+    variable_del('language_content_type_' . $type);
+    variable_del('menu_options_' . $type);
+    variable_del('menu_parent_' . $type);
+    variable_del('node_options_' . $type);
+    variable_del('node_preview_' . $type);
+    variable_del('node_submitted' . $type);
+  }
+  node_types_rebuild();
+  menu_rebuild();
+  drupal_set_message(t('The content types DA in your country and Geo menu were removed.'));
+
+  // Creates a custom box that can be changed by the editors.
+  $values = array(
+    'delta' => 'generic_country_info',
+    'description' => 'Generic country information',
+    'title' => 'Other content',
+    'body' => array(
+      'value' => 'Gunwalls ho loaded to the gunwalls sutler prow shrouds sheet heave to jury mast blow the man down. Bilged on her anchor brigantine draft lass booty trysail salmagundi hearties cog Privateer. Gangplank Sail ho Admiral of the Black list rigging bilge scourge of the seven seas execution dock reef chase guns.',
+      'format' => 'full_html',
+    ),
+  );
+  $box = boxes_factory('simple', $values);
+  $box->options['additional_classes'] = 'block-connect-country generic-country-info';
+  $box->save();
+
+  // Enables custom settings for basic page teaser view mode.
+  $settings = field_bundle_settings('node', 'page');
+  $settings['view_modes']['teaser']['custom_settings'] = TRUE;
+  $settings['extra_fields']['display']['language']['teaser']['visible'] = FALSE;
+  $settings['extra_fields']['display']['language']['teaser']['weight'] = 0;
+  $settings['extra_fields']['display']['language']['mini_teaser']['visible'] = FALSE;
+  $settings['extra_fields']['display']['language']['mini_teaser']['weight'] = 0;
+  $settings['extra_fields']['display']['share_buttons']['teaser']['visible'] = FALSE;
+  $settings['extra_fields']['display']['share_buttons']['teaser']['weight'] = 0;
+  $settings['extra_fields']['display']['share_buttons']['mini_teaser']['visible'] = FALSE;
+  $settings['extra_fields']['display']['share_buttons']['mini_teaser']['weight'] = 0;
+  field_bundle_settings('node', 'page', $settings);
+
+  // Hides language field in teaser view mode for projects.
+  $settings_project = field_bundle_settings('node', 'project');
+  $settings_project['extra_fields']['display']['language']['teaser']['visible'] = FALSE;
+  $settings_project['extra_fields']['display']['language']['mini_teaser']['visible'] = FALSE;
+  $settings_project['extra_fields']['display']['language']['teaser']['weight'] = 0;
+  $settings_project['extra_fields']['display']['language']['mini_teaser']['weight'] = 0;
+  field_bundle_settings('node', 'project', $settings_project);
+
+  // Shows description field in default full view mode of country term.
+  $settings_term = field_bundle_settings('taxonomy_term', 'country');
+  $settings_term['extra_fields']['display']['description']['default']['visible'] = TRUE;
+  $settings_term['extra_fields']['display']['description']['default']['weight'] = -9;
+  field_bundle_settings('taxonomy_term', 'country', $settings_term);
+
+  // Hides all the fields in the teaser view mode of the basic page.
+  $field_instances = field_info_instances('node', 'page');
+  foreach ($field_instances as $instance) {
+    $instance['display']['teaser']['type'] = 'hidden';
+    $instance['display']['mini_teaser']['type'] = 'hidden';
+    field_update_instance($instance);
+  }
+
+  // Sets field_shared_teaser as only visible field in teaser.
+  $teaser_instance = field_read_instance('node', 'field_shared_teaser', 'page');
+  $teaser_instance['display']['teaser'] = array(
+    'label' => 'hidden',
+    'type' => 'text_plain',
+    'module' => 'text',
+  );
+  $teaser_instance['display']['mini_teaser'] = array(
+    'module' => 'text',
+    'label' => 'hidden',
+    'settings' => array(
+      'trim_length' => 160,
+    ),
+    'type' => 'text_summary_or_trimmed',
+    'weight' => 0,
+  );
+  field_update_instance($teaser_instance);
+
+  // Creates country field instance in the basic page. This will be featurized
+  // in digital agenda general.
+  $country_field_instance = field_read_instance('node', 'field_shared_country', 'page');
+  if (!$country_field_instance) {
+    $instance = array(
+      'field_name' => 'field_shared_country',
+      'entity_type' => 'node',
+      'bundle' => 'page',
+      'label' => 'Country',
+      'description' => '',
+      'required' => 0,
+      'default_value' => NULL,
+      'widget' => array(
+        'active' => 1,
+        'module' => 'options',
+        'settings' => array(
+          'apply_chosen' => 0,
+        ),
+        'type' => 'options_select',
+        'weight' => 5,
+      ),
+    );
+    field_create_instance($instance);
+  }
+
+  // Deletes and rebuilds paths.
+  _connect_country_delete_rebuild_paths();
+
+  // Deletes the Belgian flag :'( .
+  $term = taxonomy_term_load(901);
+  $file = file_load($term->field_flag[LANGUAGE_NONE][0]['fid']);
+  unset($term->field_flag[LANGUAGE_NONE][0]);
+  file_delete($file);
+  taxonomy_term_save($term);
+
+  // Deletes obsolete fields from going local content type.
+  $fields = array(
+    'field_gl_files_to_link',
+    'field_year',
+    'field_shared_map_reference',
+  );
+  foreach ($fields as $field) {
+
+    // @todo. figure out if to keep this field in scoreboard.
+    if ($field != 'field_shared_map_reference') {
+      field_delete_field($field);
+    }
+    if ($instance = field_info_instance('node', $field, 'going_local')) {
+      field_delete_instance($instance);
+    }
+  }
+  field_purge_batch(1000);
+  watchdog('connect_country', 'The fields @fields have been deleted from the site', array('@fields' => implode(',', $fields)), WATCHDOG_INFO);
+
+  // Sets view mode defaults for the basic page.
+  // @todo: featurize.
+  $instance = field_read_instance('node', 'field_shared_teaser', 'page');
+  $instance['display']['mini_teaser']['label'] = 'hidden';
+  $instance['display']['mini_teaser']['type'] = 'trimmed_cleansed';
+  $instance['display']['mini_teaser']['settings'] = array('trim_length' => '100');
+  field_update_instance($instance);
+
+  // Disables commenting on the going local content type.
+  variable_set('comment_going_local', 0);
+  variable_set('comment_anonymous_going_local', 0);
+  variable_set('comment_default_mode_going_local', 1);
+}
+
+/**
+ * Removes obsolete fields.
+ */
+function connect_country_update_7205() {
+  $fields = array(
+    'field_gl_files_to_link',
+    'field_year',
+    'field_country_newsroom_origin_id',
+  );
+  foreach ($fields as $field) {
+    field_delete_field($field);
+  }
+  field_purge_batch(count($fields));
+}
+
+/**
+ * Removes obsolete box.
+ */
+function connect_country_update_7206() {
+  boxes_box_load('generic_country_info');
+  if (isset($box)) {
+    $box->delete;
+  }
+}

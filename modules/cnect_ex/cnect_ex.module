@@ -1,0 +1,244 @@
+<?php
+/**
+ * @file
+ * Code for the CNECT editor experience feature.
+ */
+
+include_once 'cnect_ex.features.inc';
+
+/**
+ * Implements hook_context_plugins().
+ */
+function cnect_ex_context_plugins() {
+  $plugins = array();
+  $plugins['cnect_ex_reaction_menu_parent'] = array(
+    'handler' => array(
+      'path' => drupal_get_path('module', 'cnect_ex') . '/plugins',
+      'file' => 'cnect_ex_reaction_menu_parent.inc',
+      'class' => 'CnectExMenuParentReaction',
+      'parent' => 'context_reaction',
+    ),
+  );
+
+  return $plugins;
+}
+
+/**
+ * Implements hook_context_registry().
+ */
+function cnect_ex_context_registry() {
+  return array(
+    'reactions' => array(
+      'menu_parent' => array(
+        'title' => t('Menu parent'),
+        'plugin' => 'cnect_ex_reaction_menu_parent',
+      ),
+    ),
+  );
+}
+
+/**
+ * Implements hook_context_registry_alter().
+ *
+ * Disables menu in the context UI.
+ */
+function cnect_ex_context_registry_alter(&$registry) {
+  unset($registry['conditions']['menu']);
+  unset($registry['reactions']['menu']);
+}
+
+/**
+ * Implements hook_context_page_reaction().
+ *
+ * @todo figure out. is this right way to check for reaction?
+ */
+function cnect_ex_context_page_reaction() {
+  $active_contexts = context_active_contexts();
+  foreach ($active_contexts as $active_context) {
+    if (is_array($active_context->reactions) && count($active_context->reactions) > 0) {
+      foreach (array_keys($active_context->reactions) as $reaction_type) {
+        if ($reaction_type == 'menu_parent') {
+          if ($plugin = context_get_plugin('reaction', 'menu_parent')) {
+            $plugin->execute();
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_menu().
+ */
+function cnect_ex_menu() {
+  $items['admin/config/search/xmlsitemap/update_xmlsitemap'] = array(
+    'title' => 'Update XML sitemap',
+    'description' => 'Replace XML sitemap DB table data with data entered through a textarea field',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('cnect_ex_update_xmlsitemap_form'),
+    'access arguments' => array('administer xmlsitemap'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'cnect_ex.forms.inc',
+    'weight' => 12,
+  );
+  $items['admin/config/search/path/update_aliases'] = array(
+    'title' => 'Update aliases',
+    'description' => 'Bulk update (edit, move, delete) aliases',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('cnect_ex_update_aliases_form'),
+    'access arguments' => array('administer pathauto'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'cnect_ex.forms.inc',
+    'weight' => 120,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter().
+ */
+function cnect_ex_form_node_type_form_alter(&$form, &$form_state, $form_id) {
+
+  // Removes the vertical tab Print.
+  $form['print']['#access'] = FALSE;
+}
+
+/**
+ * Implements hook_form_BASE_FORM_ID_alter().
+ */
+function cnect_ex_form_node_form_alter(&$form, &$form_state, $form_id) {
+
+  // Removes the vertical tab Print.
+  $form['print']['#access'] = FALSE;
+}
+
+/**
+ * Prepares a batch operation to update aliases.
+ *
+ * @param array $items
+ *   List of aliases.
+ *
+ * @return array
+ *   Prepared batch for Drupal batch API.
+ */
+function _cnect_ex_update_aliases(array $items) {
+  if ($items) {
+    foreach ($items as $item) {
+      $operations[] = array('_cnect_ex_update_alias', array($item));
+    }
+    $batch = array(
+      'operations' => $operations,
+      'finished' => '_cnect_ex_update_aliases_finished',
+    );
+    return $batch;
+  }
+}
+
+/**
+ * Updates the alias.
+ *
+ * @param object $item
+ *   Alias item.
+ * @param array $context
+ *   Batch context.
+ */
+function _cnect_ex_update_alias($item, array &$context) {
+  $context['results'][] = $item;
+
+  $context['message'] = t('Updating alias "!alias"', array('!alias' => $item['alias']));
+  switch ($item['action']) {
+    case "d":
+      // Delete the alias, no questions asked.
+      path_delete($item['pid']);
+      watchdog('cnect_ex', 'Alias @url was deleted', array('@url' => $item['alias']), WATCHDOG_INFO);
+      break;
+
+    case "m":
+      // Create the redirect; delete alias.
+      $redirect = new stdClass();
+      redirect_object_prepare($redirect);
+      $redirect->redirect = $item['source'];
+      $redirect->source = $item['alias'];
+
+      // Check if that redirect exists already.
+      redirect_hash($redirect);
+      $exists = redirect_load_by_hash($redirect->hash);
+      if ($exists) {
+        drupal_set_message(t("Redirect FROM url @url exists. Pid: @pid.", array(
+          '@url' => $item['alias'],
+          '@pid' => $item['pid'],
+        )
+          )
+        );
+        break;
+      }
+
+      redirect_save($redirect);
+      path_delete($item['pid']);
+      watchdog('cnect_ex', 'Alias @url was deleted and redirect has been created', array('@url' => $item['alias']), WATCHDOG_INFO);
+      break;
+
+    case "k":
+      // Keep this item intact.
+      watchdog('cnect_ex', 'Alias @url was left untouched', array('@url' => $item['alias']), WATCHDOG_INFO);
+      break;
+
+    default:
+      drupal_set_message(t("Unrecognized action: @action.", array('@action' => $item['action'])));
+  }
+}
+
+/**
+ * Displays messages after the batch has finished.
+ *
+ * @param bool $success
+ *   Batch result flag.
+ * @param array $results
+ *   Batch results.
+ * @param array $operations
+ *   List of operations executed in batch.
+ */
+function _cnect_ex_update_aliases_finished($success, $results, $operations) {
+  if ($success) {
+    drupal_set_message(t('@count aliases updated.', array('@count' => count($results))));
+  }
+}
+
+/**
+ * Implements hook_entity_info_alter().
+ *
+ * Adds an embedded view mode for each entity.
+ */
+function cnect_ex_entity_info_alter(&$entity_info) {
+  $entity_info['node']['view modes']['embedded'] = array(
+    'label' => t('Embedded'),
+    'custom settings' => TRUE,
+  );
+}
+
+/**
+ * Implements hook_theme().
+ */
+function cnect_ex_theme($existing, $type, $theme, $path) {
+  $theme = array();
+  $theme['node__embedded'] = array(
+    'render element' => 'content',
+    'base hook' => 'node',
+    'template' => 'node--embedded',
+    'path' => drupal_get_path('module', 'cnect_ex') . '/templates',
+  );
+  return $theme;
+}
+
+/**
+ * Implements hook_preprocess_node().
+ */
+function cnect_ex_preprocess_node(&$vars) {
+  if ($vars['view_mode'] == 'embedded') {
+    $vars['theme_hook_suggestions'][] = 'node__embedded';
+    $vars['classes_array'][] = 'node-embedded';
+    if (node_access("update", $vars['node']) === TRUE) {
+      $vars['edit_link']['#markup'] = l(t('Edit embedded content'), 'node/' . $vars['nid'] . '/edit');
+    }
+  }
+}

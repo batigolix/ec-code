@@ -1,0 +1,161 @@
+<?php
+
+/**
+ * @file
+ * Provides enable and disable hooks for the cnect_ex module.
+ */
+
+/**
+ * Implements hook_enable().
+ */
+function cnect_ex_enable() {
+  $t = get_t();
+  $path = drupal_get_path('module', 'cnect_ex') . '/cnect_ex.info';
+  $info = drupal_parse_info_file($path);
+  drupal_set_message($t('The module CNECT editor experience version %v is now active on your site.', array('%v' => $info['version'])));
+
+  // Enable redirects caching.
+  variable_set('menu_override_parent_selector', TRUE);
+
+  // Disable obsolete menu modules.
+  $modules = array('menu_token', 'menu_attributes');
+
+  foreach ($modules as $module) {
+    if (module_exists($module)) {
+      module_disable(array($module), TRUE);
+      drupal_uninstall_modules(array($module));
+    }
+  }
+
+  // Enable redirects caching.
+  variable_set('redirect_page_cache', 1);
+  drupal_set_message($t("Caching for page redirectin was enabled. To change this, go to Redirect module settings."));
+}
+
+/**
+ * Implements hook_disable().
+ */
+function cnect_ex_disable() {
+  $t = get_t();
+  drupal_set_message($t('The module CNECT editor experience was disabled on your site.'));
+}
+
+/**
+ * Disables node revision delete module. MULTISITE-9231.
+ */
+function cnect_ex_update_7001() {
+  $modules = array('node_revision_delete');
+  foreach ($modules as $module) {
+    if (module_exists($module)) {
+      module_disable(array($module), TRUE);
+      drupal_uninstall_modules(array($module));
+    }
+  }
+}
+
+/**
+ * Implements hook_update_N().
+ *
+ * Sets admin theme for editorial admin pages & disables obsolete modules.
+ */
+function cnect_ex_update_7002() {
+  // Unsets the list of admin pages that are displayed in the front end theme.
+  variable_set('cce_basic_config_admin_pages', array());
+
+  // Disables obsolete modules. DAE-1541 DAE-1513.
+  $modules = array('cnect_redir', 'multisite_readspeaker');
+  foreach ($modules as $module) {
+    if (module_exists($module)) {
+      module_disable(array($module), TRUE);
+      drupal_uninstall_modules(array($module));
+    }
+  }
+}
+
+/**
+ * Wipes pathauto patterns.
+ *
+ * Wipes user, file, terms patterns. See DAE-1434.
+ */
+function cnect_ex_update_7003() {
+  $patterns = array(
+    'pathauto_file_pattern',
+    'pathauto_taxonomy_term_pattern',
+    'pathauto_taxonomy_term_pillars_and_actions_pattern',
+  );
+  foreach ($patterns as $pattern) {
+    variable_set($pattern, '');
+  }
+}
+
+/**
+ * Removes printer friendlyness.
+ */
+function cnect_ex_update_7004() {
+  db_update('system')
+    ->fields(array('weight' => 5))
+    ->condition('name', 'cnect_ex', '=')
+    ->execute();
+
+  // Defines list of print variables.
+  $print_vars = array(
+    'print_html_display',
+    'print_html_display_comment',
+    'print_html_display_urllist',
+    'print_mail_display',
+    'print_mail_display_comment',
+    'print_mail_display_urllist',
+    'print_pdf_display',
+    'print_pdf_display_comment',
+    'print_pdf_display_urllist',
+  );
+
+  // Iterates through node types to remove print variables.
+  $node_types = node_type_get_types();
+  foreach ($node_types as $key => $node_type) {
+    foreach ($print_vars as $var) {
+      $var_name = $var . '_' . $key;
+      variable_set($var_name, 0);
+    }
+  }
+
+  // Iterates through obsolete node types to remove print variables.
+  $dead_node_types = array(
+    'dae_action',
+    'da_in_your_country',
+    'da_target',
+    'futurium_future',
+    'futurium_library',
+    'futurium_policy',
+    'f_a_q',
+    'map',
+    'media',
+    'metrics_survey_fiche',
+    'newsroom_delete_importer',
+    'newsroom_importer',
+    'pillar',
+    'research_results',
+    'test',
+  );
+  foreach ($dead_node_types as $node_type) {
+    foreach ($print_vars as $var) {
+      $var_name = $var . '_' . $node_type;
+      variable_del($var_name);
+    }
+  }
+}
+
+/**
+ * Deletes never used redirects. DAE-1521.
+ */
+function cnect_ex_update_7005() {
+  $query = db_select('redirect', 'r')
+    ->fields('r', array('rid', 'source', 'count', 'access'))
+    ->condition('r.count', 0, '=')
+    ->condition('r.access', 0, '=')
+    ->execute();
+  $items = $query->fetchAll();
+  foreach ($items as $item) {
+    redirect_delete($item->rid);
+  }
+}

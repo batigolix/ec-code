@@ -1,0 +1,143 @@
+<?php
+
+/**
+ * @file
+ * This file contains the sites install functions.
+ */
+
+/**
+ * Implements hook_enable().
+ */
+function g2m_initiative_enable() {
+
+  // Creates taxonomies (vocabs & terms).
+  _g2m_initiative_create_taxonomies();
+
+  // Sets defaults for content type.
+  _g2m_initiative_set_node_settings();
+
+  // Prints feedback.
+  $t = get_t();
+  drupal_set_message($t('The module Go to market initiative is now active on your site.'));
+}
+
+/**
+ * Implements hook_disable().
+ */
+function g2m_initiative_disable() {
+  $t = get_t();
+  drupal_set_message($t('The module Go to market initiative was disabled on your site.'));
+}
+
+/**
+ * Create vocabulary and terms for Topic.
+ */
+function _g2m_initiative_create_taxonomies() {
+
+  // Defines taxonomies to be created.
+  $taxonomies = array(
+    'g2m_topics' => array(
+      'name' => t('Topics'),
+    ),
+    'g2m_subtopics' => array(
+      'name' => t('Sub topics'),
+    ),
+    'g2m_support_type' => array(
+      'name' => t('Support type'),
+    ),
+    'g2m_security' => array(
+      'name' => t('Security'),
+    ),
+    'g2m_geo_focus' => array(
+      'name' => t('Geographical focus'),
+    ),
+  );
+
+  // Cycles through taxonomies to create vocabularies.
+  foreach ($taxonomies as $machine_name => $taxonomy) {
+    $vocabulary = taxonomy_vocabulary_machine_name_load($machine_name);
+    if (isset($vocabulary->vid)) {
+      watchdog('g2m_initiative', 'The vocabulary @name already exists, so it will not be created', array('@name' => $machine_name), WATCHDOG_INFO);
+    }
+
+    // Creates the vocabulary.
+    else {
+      taxonomy_vocabulary_save((object) array(
+        'name' => $taxonomy['name'],
+        'machine_name' => $machine_name,
+      ));
+    }
+
+  }
+}
+
+/**
+ * Sets content type options.
+ */
+function _g2m_initiative_set_node_settings() {
+
+  // Disables commenting on the going local content type.
+  variable_set('comment_g2m_initiative', '1');
+  variable_set('comment_anonymous_g2m_initiative', '0');
+  variable_set('comment_default_mode_g2m_initiative', '0');
+
+  variable_set('menu_options_g2m_initiative', array(0 => 'main-menu'));
+  variable_set('node_preview_g2m_initiative', 0);
+  variable_set('node_submitted_g2m_initiative', 0);
+  variable_set('menu_parent_g2m_initiative', 'main-menu:0');
+
+  // Disables subscriptions.
+  $cts = variable_get('subscriptions_blocked_content_types');
+  $cts['g2m_initiative'] = 'g2m_initiative';
+  variable_set('subscriptions_blocked_content_types', $cts);
+
+  // Sets default view modes.
+  $settings = field_bundle_settings('node', 'g2m_initiative');
+
+  // Hides extra fields in teaser view mode for best practice content.
+  $settings['extra_fields']['display']['language']['default']['visible'] = FALSE;
+  $settings['extra_fields']['display']['language']['teaser']['visible'] = FALSE;
+  $settings['extra_fields']['display']['language']['default']['weight'] = 0;
+  $settings['extra_fields']['display']['language']['teaser']['weight'] = 0;
+  $settings['extra_fields']['display']['share_buttons']['default']['visible'] = FALSE;
+  $settings['extra_fields']['display']['share_buttons']['teaser']['visible'] = FALSE;
+  $settings['extra_fields']['display']['share_buttons']['default']['weight'] = 0;
+  $settings['extra_fields']['display']['share_buttons']['teaser']['weight'] = 0;
+
+  field_bundle_settings('node', 'g2m_initiative', $settings);
+}
+
+/**
+ * Removes a map node.
+ */
+function g2m_initiative_update_7001() {
+  node_delete_multiple(array(80323));
+}
+
+/**
+ * Removes obsolete fields, rolls back previous migration, creates vocab.
+ */
+function g2m_initiative_update_7002() {
+  $fields = array(
+    'g2m_generic_information',
+    'g2m_address',
+    'g2m_location',
+    'g2m_country',
+  );
+  foreach ($fields as $field) {
+    if ($instance = field_info_instance('node', $field, 'g2m_initiative')) {
+      field_delete_instance($instance);
+    }
+  }
+  field_purge_batch(count($fields));
+
+  // Makes a fresh start by rolling back the migration.
+  migrate_static_registration(array('g2m_initiatives'));
+  $migration = Migration::getInstance('g2m_initiatives');
+  if (isset($migration)) {
+    $result = $migration->processRollback();
+  }
+
+  // Creates the geo focus vocab.
+  _g2m_initiative_create_taxonomies();
+}

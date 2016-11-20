@@ -1,0 +1,435 @@
+<?php
+
+/**
+ * @file
+ * Main bootstrap file of the Connect Country module.
+ */
+
+module_load_include('inc', 'connect_country', 'connect_country.blocks');
+module_load_include('inc', 'connect_country', 'connect_country.features');
+
+/**
+ * Implements hook_menu().
+ */
+function connect_country_menu() {
+
+  $items['country'] = array(
+    'title' => 'Countries',
+    'description' => 'View list of countries',
+    'page callback' => 'connect_country_list',
+    'access arguments' => array('access content'),
+    'file' => 'connect_country.pages.inc',
+    'type' => MENU_NORMAL_ITEM,
+    'weight' => 0,
+  );
+
+  $items['admin/config/system/connect_country'] = array(
+    'title' => 'Country pages',
+    'description' => 'Country pages configuration',
+    'page callback' => 'system_admin_menu_block_page',
+    'access arguments' => array('administer site configuration'),
+    'file' => 'system.admin.inc',
+    'file path' => drupal_get_path('module', 'system'),
+    'weight' => '99',
+  );
+
+  $items['admin/config/system/connect_country/settings'] = array(
+    'title' => 'Country pages settings',
+    'description' => 'Settings for Country pages',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('connect_country_settings'),
+    'access arguments' => array('administer site configuration'),
+    'file' => 'connect_country.forms.inc',
+  );
+
+  $items['admin/config/system/connect_country/delete_rebuild_paths'] = array(
+    'title' => 'Delete and rebuild country paths',
+    'description' => 'Delete and rebuild paths of country taxo terms',
+    'page callback' => array('_connect_country_delete_rebuild_paths'),
+    'access arguments' => array('administer site configuration'),
+    'weight' => 99,
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  $items['country/%taxonomy_term/cordis'] = array(
+    'title' => 'EU funded projects',
+    'page callback' => 'connect_country_cordis_page',
+    'page arguments' => array(1),
+    'access arguments' => array('access content'),
+    'file' => 'connect_country.pages.inc',
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function connect_country_field_formatter_info() {
+  $formatters = array(
+    'only_first_image' => array(
+      'label' => t('Only first image'),
+      'field types' => array('image'),
+      'settings' => array(
+        'image_style' => '',
+        'image_link' => '',
+      ),
+    ),
+    'trimmed_cleansed' => array(
+      'label' => t('Trimmed & cleansed'),
+      'field types' => array('text', 'text_long', 'text_with_summary'),
+      'settings' => array(
+        'trim_length' => 600,
+      ),
+    ),
+  );
+
+  return $formatters;
+}
+
+/**
+ * Implements hook_field_formatter_settings_form().
+ *
+ * Creates image field formatter that only displays the first image.
+ * Removes all html from a text field.
+ */
+function connect_country_field_formatter_settings_form($field, $instance, $view_mode, $form, &$form_state) {
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+  if ($display['type'] == 'trimmed_cleansed') {
+    $settings = $instance['display'][$view_mode]['settings'];
+    $element = array();
+    $element['trim_length'] = array(
+      '#title' => t('Trim length'),
+      '#type' => 'textfield',
+      '#size' => 10,
+      '#default_value' => $settings['trim_length'],
+      '#element_validate' => array('_element_validate_integer_positive'),
+      '#required' => TRUE,
+    );
+  }
+  elseif ($display['type'] == 'only_first_image') {
+    $element = image_field_formatter_settings_form($field, $instance, $view_mode, $form, $form_state);
+  }
+
+  return $element;
+}
+
+/**
+ * Implements hook_field_formatter_settings_summary().
+ */
+function connect_country_field_formatter_settings_summary($field, $instance, $view_mode) {
+  $display = $instance['display'][$view_mode];
+  $settings = $display['settings'];
+  if ($display['type'] == 'only_first_image') {
+    $summary = image_field_formatter_settings_summary($field, $instance, $view_mode);
+  }
+  if ($display['type'] == 'trimmed_cleansed') {
+    $summary = t('Cleansed & trimmed to !trim_length characters', array('!trim_length' => $settings['trim_length']));
+  }
+  return $summary;
+}
+
+/**
+ * Implements hook_field_formatter_view().
+ */
+function connect_country_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+  $settings = $display['settings'];
+
+  switch ($display['type']) {
+    case 'trimmed_cleansed':
+
+      // Provides a formatter that strips text rather drastically.
+      if ($items) {
+        foreach ($items as $delta => $item) {
+          $output = _text_sanitize($instance, $langcode, $item, 'value');
+
+          // Strip tags.
+          $output = strip_tags(str_replace('<', ' <', $output));
+
+          // Strip out line breaks.
+          $output = preg_replace('/\n|\r|\t/m', ' ', $output);
+
+          // Strip out non-breaking spaces.
+          $output = str_replace('&nbsp;', ' ', $output);
+          $output = str_replace("\xc2\xa0", ' ', $output);
+
+          // Strip out extra spaces.
+          $output = trim(preg_replace('/\s\s+/', ' ', $output));
+
+          // Make the trim, provided we're not showing a full summary.
+          $output = text_summary($output, $instance['settings']['text_processing'] ? $item['format'] : NULL, $settings['trim_length']);
+        }
+        $element[$delta] = array('#markup' => $output);
+      }
+      break;
+
+    case 'only_first_image':
+      if ($items) {
+
+        // Only fetch the first item from the image field array.
+        $items = array($items[0]);
+        $element = image_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display);
+      }
+      break;
+  }
+
+  return $element;
+}
+
+/**
+ * Implements hook_preprocess_node().
+ *
+ * Defines view mode; Hides author, date, title.
+ */
+function connect_country_preprocess_node(&$vars) {
+  if ($vars['view_mode'] == 'teaser') {
+    $vars['display_submitted'] = FALSE;
+  }
+  // Hide the title of the scoreboard & going local content types when they
+  // are shown as teaser.
+  if ($vars['view_mode'] == 'teaser' && ($vars['type'] == 'score_board' || $vars['type'] == 'going_local')) {
+    $vars['hide_title'] = TRUE;
+  }
+  else {
+    $vars['hide_title'] = FALSE;
+  }
+
+  // Provides the node--mini_teaser template.
+  if ($vars['view_mode'] == 'mini_teaser') {
+    $vars['theme_hook_suggestions'][] = 'node__mini_teaser';
+  }
+}
+
+/**
+ * Turns string into a user- and machine-friendly short text.
+ *
+ * Used among others in a URL to identify and describe a resource.
+ *
+ * @param string $string
+ *   String (for example a title) that must be converted.
+ *
+ * @return string
+ *   Machine friendly string.
+ */
+function _connect_country_slugify($string) {
+  return drupal_strtolower(preg_replace('/[^a-zA-Z0-9-]+/', '-', check_plain($string)));
+}
+
+/**
+ * Returns the term object matching a term ID.
+ *
+ * @param int $tid
+ *   Term ID.
+ *
+ * @return object
+ *   Taxonomy term object.
+ */
+function connect_country_taxonomy_term_load($tid) {
+  if (!is_numeric($tid)) {
+    return FALSE;
+  }
+  $term = taxonomy_term_load_multiple(array($tid), array());
+  return $term ? $term[$tid] : FALSE;
+}
+
+/**
+ * Deletes & rebuilds the aliases for the Country taxo terms.
+ *
+ * Is being called from update hooks.
+ */
+function _connect_country_delete_rebuild_paths() {
+  $vocab = taxonomy_vocabulary_machine_name_load('country');
+  $terms = taxonomy_get_tree($vocab->vid);
+  foreach ($terms as $term) {
+    path_delete(array('source' => 'taxonomy/term/' . $term->tid));
+    path_delete(array('source' => 'country/' . $term->tid));
+    $slug = _connect_country_slugify($term->name);
+    $path = array();
+    $path['source'] = 'taxonomy/term/' . $term->tid;
+    $path['alias'] = 'country/' . $slug;
+    path_save($path);
+  }
+}
+
+/**
+ * Implements hook_entity_info_alter().
+ *
+ * Adds view mode to certain entities.
+ */
+function connect_country_entity_info_alter(&$entity_info) {
+  $entities = array('node', 'taxonomy_term', 'user');
+  foreach ($entities as $entity) {
+    $entity_info[$entity]['view modes']['mini_teaser'] = array(
+      'label' => t('Mini teaser'),
+      'custom settings' => TRUE,
+    );
+  }
+}
+
+/**
+ * Returns term ids of countries.
+ *
+ * @return array
+ *   List of term IDs.
+ */
+function _connect_country_fetch_countries() {
+  $query = new EntityFieldQuery();
+  $query->entityCondition('entity_type', 'taxonomy_term')
+    ->entityCondition('bundle', array('country'))
+    ->propertyOrderBy('weight')
+    ->pager(32);
+  $result = $query->execute();
+  $tids = array_keys($result['taxonomy_term']);
+  return $tids;
+}
+
+/**
+ * Returns renderable array with countries (in mini teaser view mode).
+ *
+ * @return array
+ *   Renderable list of taxonomy terms.
+ */
+function _connect_country_countries() {
+  $build = array();
+  $tids = _connect_country_fetch_countries();
+  if (!empty($tids)) {
+    $build['countries'] = entity_view('taxonomy_term', entity_load('taxonomy_term', $tids), 'mini_teaser');
+  }
+  return $build;
+}
+
+/**
+ * Implements hook_module_implements_alter().
+ *
+ * Runs menu alter hooks of this modules after those of other modules.
+ */
+function connect_country_module_implements_alter(&$implementations, $hook) {
+  if ($hook == 'menu_alter' || $hook == 'form_alter') {
+    $module = 'connect_country';
+    if (isset($implementations[$module])) {
+      $group = array($module => $implementations[$module]);
+      unset($implementations[$module]);
+      $implementations = $implementations + $group;
+    }
+  }
+}
+
+/**
+ * Implements hook_page_alter().
+ */
+function connect_country_page_alter(&$page) {
+
+  // Moves the system main block to first position in the
+  // $vars['page']['content'] array. This ugly solution is needed because
+  // weight set by context is overwritten somewhere (possibly bug?).
+  // http://drupal.stackexchange.com/q/98153/12010.
+  if (isset($page['content']['connect_country_champion']) || isset($page['content']['connect_country_scoreboard']) || isset($page['content']['connect_country_going'])) {
+    if (!empty($page['content']['system_main'])) {
+      $page['content']['system_main']['#weight'] = -999;
+      $page['content']['#sorted'] = FALSE;
+    }
+  }
+}
+
+/**
+ * Implements hook_entity_view().
+ */
+function connect_country_taxonomy_term_view($term, $view_mode, $langcode) {
+
+  // Sets 'My country' node as parent in the menu for country pages.
+  // @todo. See if this can be done through context for flexibility.
+  if ($term->vocabulary_machine_name == 'country') {
+    $parent_item = variable_get('connect_country_parent_item', 'node/78006');
+    menu_tree_set_path('main-menu', $parent_item);
+  }
+}
+
+/**
+ * Checks if wrapped entity fields have a value.
+ *
+ * @param string $field
+ *   Name of the field that should be checked.
+ * @param object $wrentity
+ *   Entity wrapped by entity metadata wrapper.
+ *
+ * @return bool
+ *   TRUE if the field has a value.
+ */
+function _connect_country_fieldcheck($field, $wrentity) {
+  if ($wrentity->__isset($field)) {
+    $fieldvalue = $wrentity->$field->value();
+    if (!empty($fieldvalue)) {
+      return TRUE;
+    }
+  }
+  else {
+    return FALSE;
+  }
+}
+
+/**
+ * Implements hook_form_alter().
+ *
+ * Disables the wysiwyg editor for the block and boxes admin pages to save time
+ * and prevents screw ups by the wysiwyg editor.
+ */
+function connect_country_form_alter(&$form, &$form_state, $form_id) {
+  $message = '<em>' . t('Wysiwyg editor for blocks and boxes has been disabled by the Connect Country module.') . '</em>';
+  switch ($form_id) {
+    case 'block_add_block_form':
+      $form['settings']['body_field']['body']['#wysiwyg'] = FALSE;
+      $form['settings']['body_field']['body']['#prefix'] = $message;
+      break;
+
+    case 'block_admin_configure':
+      $form['settings']['options']['body']['#wysiwyg'] = FALSE;
+      $form['settings']['options']['body']['#suffix'] = $message;
+      break;
+
+    case 'boxes_box_form':
+    case 'boxes_add_form':
+      $form['options']['body']['#wysiwyg'] = FALSE;
+      $form['options']['body']['#suffix'] = $message;
+      break;
+  }
+}
+
+/**
+ * Implements hook_preprocess_block().
+ */
+function connect_country_preprocess_block(&$variables) {
+  // Constructs a block ID based on module, region and delta.
+  $block_id = $variables['elements']['#block']->region . '-' . $variables['elements']['#block']->module . '-' . $variables['elements']['#block']->delta;
+
+  // Adds class to generic country info block.
+  // @todo check duplicate class.
+  switch ($block_id) {
+    case 'content-connect_country-generic_info':
+      $variables['classes_array'][] = 'block-connect-country';
+      break;
+
+  }
+}
+
+/**
+ * Implements hook_node_view().
+ */
+function connect_country_node_view($node, $view_mode, $langcode) {
+  if ($view_mode == 'mini_teaser') {
+    $links = array();
+    $node_title_stripped = strip_tags($node->title);
+    $links['node-readmore'] = array(
+      'title' => t('Read more<span class="element-invisible"> about @title</span>', array('@title' => $node_title_stripped)),
+      'href' => 'node/' . $node->nid,
+      'html' => TRUE,
+      'attributes' => array('rel' => 'tag', 'title' => $node_title_stripped),
+    );
+    $node->content['links']['readmore'] = array(
+      '#theme' => 'links__node__node',
+      '#links' => $links,
+      '#attributes' => array('class' => array('links', 'inline')),
+    );
+  }
+}
