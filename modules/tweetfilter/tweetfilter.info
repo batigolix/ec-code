@@ -1,0 +1,8 @@
+name = Twitter filter for text formats
+description = Provides a filter that turns twitter IDS into embedded tweets to be used inside a long text field.
+core = 7.x
+package = DG Connect
+dependencies[] = filter
+multisite_version = 2.2
+project path = sites/all/modules/tweetfilter
+php = 5.2.4

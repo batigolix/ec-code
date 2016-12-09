@@ -1,0 +1,170 @@
+<?php
+
+/**
+ * @file
+ * Provides hooks and helper functions for the tweetfilter module.
+ */
+
+/**
+ * Implements hook_filter_info().
+ */
+function tweetfilter_filter_info() {
+  $filters['embed_tweet'] = array(
+    'title' => t('Embed tweet'),
+    'description' => t('Converts URLs for Twitter status updates into an embedded tweet. Should be sorted after the "Limit allowed HTML tags" filter, if used.'),
+    'process callback' => '_tweetfilter_embed_tweet',
+    'tips callback' => '_tweetfilter_tip_embed_tweet',
+  );
+
+  return $filters;
+}
+
+/**
+ * Provides filter tips for embedded tweets.
+ *
+ * @return string
+ *   Tip about usage of filter.
+ */
+function _tweetfilter_tip_embed_tweet($filter, $format, $long = FALSE) {
+  return t('To embed a tweet use the tweetfilter token as follows: [tweetfilter|type:single|statusid:804232994517090304]. The status ID can be found when sharing a a tweet on twitter.com. For the time being only single tweets can be embedded.');
+}
+
+/**
+ * Processes the text.
+ *
+ * This code is lifted out of the twitter module. See
+ * https://www.drupal.org/project/twitter.
+ *
+ * @return string
+ *   Processed text.
+ */
+function _tweetfilter_embed_tweet($text, $filter) {
+
+  // Split at all tags; ensures that no tags or attributes are processed.
+  $chunks = preg_split('/(<.+?>)/is', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+
+  foreach ($chunks as $i => $chunk) {
+    preg_match_all('/\[tweetfilter\|(.+?)\]/i', $chunks[$i], $tweet_tokens, PREG_SET_ORDER);
+
+    // Finds tweetfilter tokens and collects tweet data.
+    foreach ($tweet_tokens as $tweet_token) {
+      if ($tweet_token[1]) {
+        $tweet_token_parts = explode('|', $tweet_token[1]);
+        foreach ($tweet_token_parts as $tweet_token_part) {
+          $tweet_token_properties = explode(':', $tweet_token_part);
+          $tweet[$tweet_token_properties[0]] = $tweet_token_properties[1];
+        }
+      }
+
+      // Embeds the tweet if it is of the type single. We ignore other types
+      // for the time being.
+      if ($tweet['type'] = 'single') {
+        $embed = _twitter_statuses($tweet);
+        $chunks[$i] = str_replace($tweet_token[0], $embed, $chunks[$i]);
+      }
+    }
+  }
+  return implode($chunks);
+}
+
+/**
+ * Generates the webtools snippet for tweets.
+ *
+ * @param array $tweet
+ *   Associative array containing tweet data.
+ *
+ * @return array
+ *   Script tag and webtools parameters
+ */
+function _twitter_statuses($tweet) {
+
+  // Defines the webtools parameters for embedding a single tweet.
+  $webtools_parameters = array(
+    "service" => "smk",
+    "type" => $tweet['type'],
+    "display_user" => variable_get('tweetfilter_webtools_display_user') ? 'true' : 'false',
+    "display_user_pic" => variable_get('tweetfilter_webtools_display_user_pic') ? 'true' : 'false',
+    "auto_expand_photo" => variable_get('tweetfilter_webtools_auto_expand_photo') ? 'true' : 'false',
+    "id" => $tweet['statusid'],
+  );
+
+  // Generates the webtools snippet.
+  $html = '<script type="application/json">' . drupal_json_encode($webtools_parameters) . '</script>';
+  return $html;
+}
+
+/**
+ * Implements template_preprocess_page().
+ *
+ * @todo find more intelligent way to include the webtools smartloader.
+ */
+function tweetfilter_preprocess_page(&$variables) {
+  $url = variable_get('tweetfilter_webtools_smartloader_url', '//europa.eu/webtools/load.js');
+
+  // Includes the Webtools smartloader in the page.
+  drupal_add_js($url, array(
+    'type' => 'external',
+    'defer' => TRUE,
+    'scope' => 'footer',
+  ));
+}
+
+/**
+ * Implements hook_menu().
+ */
+function tweetfilter_menu() {
+  $items = array();
+  $items['admin/config/content/tweetfilter'] = array(
+    'title' => 'Tweetfilter settings',
+    'description' => 'Configuration for tweetfilter',
+    'page callback' => 'system_admin_menu_block_page',
+    'access arguments' => array('administer site configuration'),
+    'file' => 'system.admin.inc',
+    'file path' => drupal_get_path('module', 'system'),
+    'weight' => '0',
+  );
+  $items['admin/config/content/tweetfilter/settings'] = array(
+    'title' => 'Tweetfilter settings',
+    'description' => 'Settings for using tweetfilter',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('_tweetfilter_twitter_settings_form'),
+    'access arguments' => array('administer site configuration'),
+    'file' => 'tweetfilter.admin.inc',
+  );
+  return $items;
+}
+
+/**
+ * Generates the the webtools snippet for a user twitter timeline.
+ *
+ * @todo verify with wt team if tweet_more_btn works
+ *
+ * @param string $url
+ *   Url of the tweet.
+ * @param string $user
+ *   Twitter user ID.
+ *
+ * @return array
+ *   Script tag and webtools parameters
+ */
+function _twitter_user_timeline($url, $user) {
+
+  // Defines the webtools parameters for embedding a single tweet.
+  $webtools_parameters = array(
+    "service" => "smk",
+    "type" => "user",
+    "display_user" => variable_get('tweetfilter_webtools_display_user') ? 'true' : 'false',
+    "display_user_pic" => variable_get('tweetfilter_webtools_display_user_pic') ? 'true' : 'false',
+    "auto_expand_photo" => variable_get('tweetfilter_webtools_auto_expand_photo') ? 'true' : 'false',
+    "screen_name" => $user,
+    "count" => variable_get('tweetfilter_webtools_count', 3),
+    "include_rts" => variable_get('tweetfilter_webtools_include_rts') ? 'true' : 'false',
+    "rts_display_original" => variable_get('tweetfilter_webtools_rts_display_original') ? 'true' : 'false',
+    "exclude_replies" => variable_get('tweetfilter_webtools_show_replies') ? 'false' : 'true',
+    "tweet_more_btn" => variable_get('tweetfilter_webtools_tweet_more_btn') ? 'true' : 'false',
+  );
+
+  // Generates the webtools snippet.
+  $html = '<script type="application/json">' . drupal_json_encode($webtools_parameters) . '</script>';
+  return $html;
+}
